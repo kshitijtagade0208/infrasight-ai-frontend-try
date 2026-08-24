@@ -22,6 +22,7 @@ export interface Project {
   name: string;
   code: string;
   ministry: string;
+  agency?: string;
   state: string;
   district: string;
   sector: string;
@@ -31,6 +32,8 @@ export interface Project {
   budgetCrore: number;
   spentCrore: number;
   progressPercent: number;
+  visualProgressEstimate?: number;
+  cctvAvailable?: boolean;
   startDate: string;
   targetEndDate: string;
   contractor: string;

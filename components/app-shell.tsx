@@ -9,6 +9,7 @@ import {
   FolderKanban,
   BellRing,
   Map as MapIcon,
+  Bot,
   Shield,
   Radar,
   Search,
@@ -46,6 +47,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Projects', href: '/projects', icon: FolderKanban },
   { label: 'Alerts', href: '/alerts', icon: BellRing },
   { label: 'Map', href: '/map', icon: MapIcon },
+  { label: 'AI Assistant', href: '/ai-assistant', icon: Bot },
   { label: 'Admin', href: '/admin', icon: Shield },
 ];
 
