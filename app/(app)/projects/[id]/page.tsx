@@ -56,6 +56,8 @@ import {
   FileSearch,
   BadgeAlert,
   ArrowUpRight,
+  Loader2,
+  Bot,
 } from 'lucide-react';
 
 function formatDate(iso: string): string {
@@ -156,23 +158,151 @@ export default function ProjectDetailPage() {
   const [alerts, setAlerts] = React.useState<Alert[]>(initialAlerts);
   const [actionConfirmations, setActionConfirmations] = React.useState<Record<string, ActionConfirmation>>({});
 
+  // Risk Dossier Generation State
+  const [isGeneratingDossier, setIsGeneratingDossier] = React.useState(false);
+  const [dossier, setDossier] = React.useState<{
+    dossierId: string;
+    text: string;
+    generatedAt: string;
+  } | null>(null);
+  const [dossierError, setDossierError] = React.useState<string | null>(null);
+  const dossierSectionRef = React.useRef<HTMLDivElement>(null);
+
+  // Reset dossier and error when switching projects
+  React.useEffect(() => {
+    setDossier(null);
+    setDossierError(null);
+  }, [project?.id]);
+
   if (!project) {
     return notFound();
   }
 
   const budgetUtilization = Math.round((project.spentCrore / project.budgetCrore) * 100);
 
-  // Overall Risk metrics (Dynamic baseline calibrated to high-risk telemetry requirements)
-  const overallRiskScore = project.riskScore >= 70 ? project.riskScore : 81;
+  const isKenBetwa = project.id === 'PRJ-002' || project.code === 'KBRL-01';
+
+  // Overall Risk metrics
+  const overallRiskScore = project.riskScore;
   const overallRiskBand: RiskBand =
-    overallRiskScore >= 76 ? 'critical' : overallRiskScore >= 56 ? 'high' : 'moderate';
+    project.riskBand ||
+    (overallRiskScore >= 76
+      ? 'critical'
+      : overallRiskScore >= 56
+      ? 'high'
+      : overallRiskScore >= 31
+      ? 'moderate'
+      : 'low');
 
   const visualEstimate =
     typeof project.visualProgressEstimate === 'number'
       ? project.visualProgressEstimate
-      : Math.max(10, project.progressPercent - 17);
+      : Math.max(5, project.progressPercent - (overallRiskScore > 50 ? 12 : 3));
 
   const variance = visualEstimate - project.progressPercent;
+
+  // Project critical path delay metrics
+  const projectDelayDays = isKenBetwa
+    ? 248
+    : project.status === 'delayed' || project.status === 'critical' || overallRiskScore >= 75
+    ? Math.max(45, Math.round(overallRiskScore * 2.8))
+    : project.status === 'at-risk' || overallRiskScore >= 50
+    ? Math.max(20, Math.round(overallRiskScore * 2.2))
+    : Math.max(0, Math.round(overallRiskScore * 0.8));
+
+  const projectDelayMonths = isKenBetwa
+    ? '6.4'
+    : (projectDelayDays / 38.75).toFixed(1);
+
+  const projectDelayText = isKenBetwa
+    ? '248 days (6.4 mos)'
+    : projectDelayDays > 0
+    ? `${projectDelayDays} days (${projectDelayMonths} mos)`
+    : 'On Schedule';
+
+  const projectDelayLongText = isKenBetwa
+    ? '248 days / 6.4 months'
+    : projectDelayDays > 0
+    ? `${projectDelayDays} days / ${projectDelayMonths} months`
+    : 'On Schedule (0 days delay)';
+
+  // Cost escalation exposure likelihood
+  const projectCostOverrun = isKenBetwa
+    ? 72
+    : overallRiskScore >= 75
+    ? Math.min(92, Math.round(overallRiskScore * 0.88))
+    : overallRiskScore >= 50
+    ? Math.min(75, Math.round(overallRiskScore * 0.82))
+    : Math.max(10, Math.round(overallRiskScore * 0.5));
+
+  const handleGenerateDossier = async () => {
+    if (isGeneratingDossier || !project) return;
+    setIsGeneratingDossier(true);
+    setDossierError(null);
+
+    try {
+      const driversList = [
+        `Progress-Evidence Divergence: Contractor/billing reported physical progress is ${project.progressPercent}%, whereas visual and observational satellite/sensor telemetry estimates ${visualEstimate}% (${variance > 0 ? `+${variance}` : variance} percentage points variance).`,
+        `Critical-Path Milestone Slippage: Project exhibits critical milestone delays running approximately ${projectDelayLongText} behind baseline schedule.`,
+        `Declining Site Activity: Multi-spectral sensor telemetry indicates equipment and work activity pace relative to scheduled milestones.`,
+        `Capital Burn-Rate Discrepancy: Capital expenditure disbursements pace with an estimated ${projectCostOverrun}% probability of cost escalation.`,
+      ];
+
+      const alertsList = alerts.map((a) => `${a.id} [${a.severity.toUpperCase()}]: ${a.title}`);
+
+      const res = await fetch('/api/dossier', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          projectId: project.id,
+          projectCode: project.code,
+          projectName: project.name,
+          ministry: project.ministry,
+          state: project.state,
+          district: project.district,
+          contractor: project.contractor,
+          budgetCrore: project.budgetCrore,
+          spentCrore: project.spentCrore,
+          progressPercent: project.progressPercent,
+          visualProgressEstimate: visualEstimate,
+          variance,
+          riskScore: overallRiskScore,
+          riskBand: overallRiskBand,
+          delayText: projectDelayLongText,
+          costOverrunProbability: projectCostOverrun,
+          evidenceList: project.evidence,
+          topDrivers: driversList,
+          activeAlerts: alertsList,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        throw new Error(data.error || `Server responded with status code ${res.status}`);
+      }
+
+      setDossier({
+        dossierId: data.dossierId || `DOS-${project.code}-20260824`,
+        text: data.text,
+        generatedAt: data.generatedAt || new Date().toISOString(),
+      });
+
+      setTimeout(() => {
+        dossierSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
+    } catch (err: any) {
+      console.error('Failed to generate risk dossier:', err);
+      setDossierError(
+        err?.message ||
+          'Failed to generate Risk Dossier. Please verify your GEMINI_API_KEY configuration or connection.'
+      );
+    } finally {
+      setIsGeneratingDossier(false);
+    }
+  };
 
   const facts = [
     { icon: MapPin, label: 'Location', value: `${project.district}, ${project.state}` },
@@ -299,8 +429,28 @@ export default function ProjectDetailPage() {
                 <ArrowLeft className="h-3.5 w-3.5" /> Back to Projects
               </Button>
             </Link>
-            <Button size="sm" className="text-xs">
-              Generate Risk Dossier
+            <Link href={`/ai-assistant?projectId=${project.id}`}>
+              <Button variant="outline" size="sm" className="gap-1.5 text-xs">
+                <Bot className="h-3.5 w-3.5 text-primary" /> AI Assistant Analysis
+              </Button>
+            </Link>
+            <Button
+              size="sm"
+              className="gap-1.5 text-xs font-semibold shadow-2xs"
+              onClick={handleGenerateDossier}
+              disabled={isGeneratingDossier}
+            >
+              {isGeneratingDossier ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Generating Dossier...
+                </>
+              ) : (
+                <>
+                  <FileText className="h-3.5 w-3.5" />
+                  {dossier ? 'Regenerate Risk Dossier' : 'Generate Risk Dossier'}
+                </>
+              )}
             </Button>
           </div>
         }
@@ -360,6 +510,224 @@ export default function ProjectDetailPage() {
           </div>
         </Card>
 
+        {/* RISK DOSSIER SECTION (DYNAMIC GENERATION) */}
+        {isGeneratingDossier && (
+          <Card className="border-primary/40 bg-primary/5 p-6 shadow-2xs">
+            <div className="flex flex-col items-center justify-center space-y-3 py-6 text-center">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <Loader2 className="h-5 w-5 animate-spin" />
+              </div>
+              <div className="space-y-1">
+                <h4 className="text-sm font-semibold text-foreground">
+                  Generating Executive Risk Dossier for {project.code}...
+                </h4>
+                <p className="text-xs text-muted-foreground max-w-md">
+                  Synthesizing multi-spectral satellite telemetry, cost burn-rate ratios, critical-path milestone delays, and AI risk interpretations.
+                </p>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {dossierError && (
+          <div className="rounded-sm border border-destructive/40 bg-destructive/10 p-4 text-xs">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-destructive mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-semibold text-destructive">
+                    Risk Dossier Generation Failed
+                  </p>
+                  <p className="text-[11px] leading-relaxed text-foreground">
+                    {dossierError}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleGenerateDossier}
+                  className="h-7 text-xs border-destructive/30 hover:bg-destructive/10 text-destructive font-medium"
+                >
+                  Retry
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => setDossierError(null)}
+                  className="text-muted-foreground hover:text-foreground p-1"
+                  aria-label="Dismiss error message"
+                >
+                  <XCircle className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {dossier && !isGeneratingDossier && (
+          <div ref={dossierSectionRef} className="space-y-4">
+            <Card className="border-border bg-card shadow-2xs overflow-hidden">
+              {/* Dossier Top Banner */}
+              <div className="border-b border-border bg-muted/40 px-5 py-3.5 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-sm border border-primary/30 bg-primary/10 text-primary">
+                    <FileText className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs font-bold text-foreground">
+                        {dossier.dossierId}
+                      </span>
+                      <span className="rounded-xs border border-border bg-background px-1.5 py-0.2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        Official Executive Dossier
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Generated on {formatDate(dossier.generatedAt)} · Synthesized from active telemetry & risk parameters
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleGenerateDossier}
+                    disabled={isGeneratingDossier}
+                    className="h-7 gap-1 text-xs"
+                  >
+                    <RotateCcw className="h-3 w-3" /> Regenerate
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setDossier(null)}
+                    className="h-7 text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    Dismiss Dossier
+                  </Button>
+                </div>
+              </div>
+
+              <CardContent className="p-5 space-y-5">
+                {/* Project Key Metrics Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 border-b border-border pb-4">
+                  <div className="rounded-sm border border-border/80 bg-muted/20 p-2.5">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Overall Risk Score
+                    </span>
+                    <div className="mt-1 flex items-baseline gap-1.5">
+                      <span
+                        className={`font-mono text-xl font-bold ${
+                          overallRiskBand === 'critical'
+                            ? 'text-risk-critical'
+                            : overallRiskBand === 'high'
+                            ? 'text-risk-high'
+                            : overallRiskBand === 'moderate'
+                            ? 'text-risk-medium'
+                            : 'text-risk-low'
+                        }`}
+                      >
+                        {overallRiskScore}
+                      </span>
+                      <span className="font-mono text-xs text-muted-foreground">/ 100</span>
+                      <span
+                        className={`text-[10px] font-bold uppercase ml-auto ${
+                          overallRiskBand === 'critical'
+                            ? 'text-risk-critical'
+                            : overallRiskBand === 'high'
+                            ? 'text-risk-high'
+                            : overallRiskBand === 'moderate'
+                            ? 'text-risk-medium'
+                            : 'text-risk-low'
+                        }`}
+                      >
+                        {overallRiskBand}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-sm border border-border/80 bg-muted/20 p-2.5">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Physical vs. Visual
+                    </span>
+                    <div className="mt-1 flex items-baseline justify-between">
+                      <span className="font-mono text-xs font-semibold text-foreground">
+                        {project.progressPercent}% / {visualEstimate}%
+                      </span>
+                      <span
+                        className={`font-mono text-xs font-bold ${
+                          Math.abs(variance) > 5 ? 'text-risk-critical' : 'text-foreground'
+                        }`}
+                      >
+                        {variance > 0 ? `+${variance}%` : `${variance}%`}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-sm border border-border/80 bg-muted/20 p-2.5">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Critical-Path Delay
+                    </span>
+                    <div className="mt-1">
+                      <span
+                        className={`font-mono text-xs font-bold ${
+                          projectDelayDays > 60
+                            ? 'text-risk-critical'
+                            : projectDelayDays > 0
+                            ? 'text-risk-high'
+                            : 'text-risk-low'
+                        }`}
+                      >
+                        {projectDelayText}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-sm border border-border/80 bg-muted/20 p-2.5">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Cost Escalation Exposure
+                    </span>
+                    <div className="mt-1">
+                      <span
+                        className={`font-mono text-xs font-bold ${
+                          projectCostOverrun >= 70
+                            ? 'text-risk-high'
+                            : projectCostOverrun >= 40
+                            ? 'text-risk-medium'
+                            : 'text-risk-low'
+                        }`}
+                      >
+                        {projectCostOverrun}% Likelihood
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Dossier AI Synthesis Body */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground uppercase tracking-wider">
+                    <ShieldAlert className="h-3.5 w-3.5 text-primary" />
+                    Executive Synthesis & Strategic Assessment
+                  </div>
+                  <div className="rounded-sm border border-border/70 bg-muted/10 p-4 text-[13px] leading-relaxed text-foreground whitespace-pre-wrap">
+                    {dossier.text}
+                  </div>
+                </div>
+
+                {/* Statutory Human Decision Disclaimer */}
+                <div className="rounded-sm border border-border/80 bg-muted/30 p-3 text-[11px] text-muted-foreground flex items-start gap-2.5">
+                  <Info className="h-4 w-4 shrink-0 text-primary mt-0.5" />
+                  <p>
+                    <strong className="text-foreground">Statutory Officer Decision Notice:</strong> This Risk Dossier is an AI-generated analytical synthesis designed exclusively for decision-support and supervisory audit prioritization. All contractual enforcements, financial withholdings, and field inspection orders require human officer authorization.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
         {/* 3. PRIMARY NAVIGATION TABS */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="h-10 w-full justify-start rounded-md border border-border bg-muted/40 p-1">
@@ -410,20 +778,40 @@ export default function ProjectDetailPage() {
                     <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       1. Overall Risk
                     </CardTitle>
-                    <span className="rounded-xs border border-risk-critical/30 bg-risk-critical/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-risk-critical">
-                      Critical
+                    <span
+                      className={`rounded-xs border px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                        overallRiskBand === 'critical'
+                          ? 'border-risk-critical/30 bg-risk-critical/10 text-risk-critical'
+                          : overallRiskBand === 'high'
+                          ? 'border-risk-high/30 bg-risk-high/10 text-risk-high'
+                          : overallRiskBand === 'moderate'
+                          ? 'border-risk-medium/30 bg-risk-medium/10 text-risk-medium'
+                          : 'border-risk-low/30 bg-risk-low/10 text-risk-low'
+                      }`}
+                    >
+                      {overallRiskBand}
                     </span>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-2">
                   <div className="flex items-baseline justify-between">
                     <div>
-                      <span className="font-mono text-3xl font-bold tracking-tight text-risk-critical">
-                        81
+                      <span
+                        className={`font-mono text-3xl font-bold tracking-tight ${
+                          overallRiskBand === 'critical'
+                            ? 'text-risk-critical'
+                            : overallRiskBand === 'high'
+                            ? 'text-risk-high'
+                            : overallRiskBand === 'moderate'
+                            ? 'text-risk-medium'
+                            : 'text-risk-low'
+                        }`}
+                      >
+                        {overallRiskScore}
                       </span>
                       <span className="font-mono text-sm text-muted-foreground"> / 100</span>
                     </div>
-                    <RiskBadge band="critical" showDot={true} />
+                    <RiskBadge band={overallRiskBand} showDot={true} />
                   </div>
 
                   <div className="rounded-sm border border-border/80 bg-muted/30 p-2 text-[11px] leading-snug text-muted-foreground">
@@ -441,37 +829,53 @@ export default function ProjectDetailPage() {
                     <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       2. Cost-Overrun Risk
                     </CardTitle>
-                    <span className="rounded-xs border border-risk-high/30 bg-risk-high/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-risk-high">
-                      High Risk
+                    <span
+                      className={`rounded-xs border px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                        projectCostOverrun >= 70
+                          ? 'border-risk-high/30 bg-risk-high/10 text-risk-high'
+                          : projectCostOverrun >= 40
+                          ? 'border-risk-medium/30 bg-risk-medium/10 text-risk-medium'
+                          : 'border-risk-low/30 bg-risk-low/10 text-risk-low'
+                      }`}
+                    >
+                      {projectCostOverrun >= 70 ? 'High Risk' : projectCostOverrun >= 40 ? 'Moderate' : 'Low Risk'}
                     </span>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-2.5">
                   <div className="flex items-baseline justify-between">
                     <div>
-                      <span className="font-mono text-3xl font-bold tracking-tight text-risk-high">
-                        72%
+                      <span
+                        className={`font-mono text-3xl font-bold tracking-tight ${
+                          projectCostOverrun >= 70
+                            ? 'text-risk-high'
+                            : projectCostOverrun >= 40
+                            ? 'text-risk-medium'
+                            : 'text-risk-low'
+                        }`}
+                      >
+                        {projectCostOverrun}%
                       </span>
                       <span className="text-xs text-muted-foreground"> probability</span>
                     </div>
                     <span className="font-mono text-xs font-semibold text-risk-high">
-                      +14.8% var.
+                      {variance < 0 ? `${variance}% var.` : `+${variance}% var.`}
                     </span>
                   </div>
 
                   {/* Supporting Factors */}
                   <div className="space-y-1.5 border-t border-border/60 pt-2 text-[11px]">
                     <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground">Current cost variance:</span>
-                      <span className="font-mono font-medium text-foreground">+14.8% above burn</span>
+                      <span className="text-muted-foreground">Budget utilization:</span>
+                      <span className="font-mono font-medium text-foreground">{budgetUtilization}% of outlay</span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground">Expected escalation:</span>
-                      <span className="font-mono font-semibold text-risk-high">₹2,420 Cr est.</span>
+                      <span className="text-muted-foreground">Disbursed capex:</span>
+                      <span className="font-mono font-semibold text-foreground">₹{project.spentCrore.toLocaleString('en-IN')} Cr</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground">Probability of escalation:</span>
-                      <span className="font-mono font-bold text-risk-high">72% likelihood</span>
+                      <span className="font-mono font-bold text-risk-high">{projectCostOverrun}% likelihood</span>
                     </div>
                   </div>
                 </CardContent>
@@ -484,16 +888,32 @@ export default function ProjectDetailPage() {
                     <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       3. Delay Risk
                     </CardTitle>
-                    <span className="rounded-xs border border-risk-critical/30 bg-risk-critical/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-risk-critical">
-                      Critical
+                    <span
+                      className={`rounded-xs border px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                        projectDelayDays > 60
+                          ? 'border-risk-critical/30 bg-risk-critical/10 text-risk-critical'
+                          : projectDelayDays > 0
+                          ? 'border-risk-high/30 bg-risk-high/10 text-risk-high'
+                          : 'border-risk-low/30 bg-risk-low/10 text-risk-low'
+                      }`}
+                    >
+                      {projectDelayDays > 60 ? 'Critical' : projectDelayDays > 0 ? 'High Risk' : 'On Track'}
                     </span>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-2.5">
                   <div className="flex items-baseline justify-between">
                     <div>
-                      <span className="font-mono text-3xl font-bold tracking-tight text-risk-critical">
-                        79%
+                      <span
+                        className={`font-mono text-3xl font-bold tracking-tight ${
+                          projectDelayDays > 60
+                            ? 'text-risk-critical'
+                            : projectDelayDays > 0
+                            ? 'text-risk-high'
+                            : 'text-risk-low'
+                        }`}
+                      >
+                        {isKenBetwa ? '79%' : `${Math.min(95, Math.round(overallRiskScore * 0.95))}%`}
                       </span>
                       <span className="text-xs text-muted-foreground"> probability</span>
                     </div>
@@ -504,7 +924,7 @@ export default function ProjectDetailPage() {
                   <div className="space-y-1.5 border-t border-border/60 pt-2 text-[11px]">
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground">Expected delay:</span>
-                      <span className="font-mono font-bold text-risk-critical">6.4 months</span>
+                      <span className="font-mono font-bold text-risk-critical">{isKenBetwa ? '6.4 months' : `${projectDelayMonths} months`}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground">Target end date:</span>
@@ -513,9 +933,9 @@ export default function ProjectDetailPage() {
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground">Projected end date:</span>
+                      <span className="text-muted-foreground">Schedule status:</span>
                       <span className="font-mono font-semibold text-risk-critical">
-                        June 2027 (est.)
+                        {projectDelayText}
                       </span>
                     </div>
                   </div>
@@ -529,20 +949,38 @@ export default function ProjectDetailPage() {
                     <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       4. Implementation Risk
                     </CardTitle>
-                    <span className="rounded-xs border border-risk-critical/30 bg-risk-critical/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-risk-critical">
-                      Critical
+                    <span
+                      className={`rounded-xs border px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                        overallRiskBand === 'critical'
+                          ? 'border-risk-critical/30 bg-risk-critical/10 text-risk-critical'
+                          : overallRiskBand === 'high'
+                          ? 'border-risk-high/30 bg-risk-high/10 text-risk-high'
+                          : 'border-risk-medium/30 bg-risk-medium/10 text-risk-medium'
+                      }`}
+                    >
+                      {overallRiskBand}
                     </span>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-2">
                   <div className="flex items-baseline justify-between">
                     <div>
-                      <span className="font-mono text-3xl font-bold tracking-tight text-risk-critical">
-                        84
+                      <span
+                        className={`font-mono text-3xl font-bold tracking-tight ${
+                          overallRiskBand === 'critical'
+                            ? 'text-risk-critical'
+                            : overallRiskBand === 'high'
+                            ? 'text-risk-high'
+                            : 'text-risk-medium'
+                        }`}
+                      >
+                        {isKenBetwa ? 84 : Math.min(96, Math.max(15, Math.round(overallRiskScore * 1.03)))}
                       </span>
                       <span className="font-mono text-sm text-muted-foreground"> / 100</span>
                     </div>
-                    <span className="text-xs font-medium text-risk-critical">Severe Hazard</span>
+                    <span className="text-xs font-medium text-risk-critical">
+                      {overallRiskBand === 'critical' ? 'Severe Hazard' : overallRiskBand === 'high' ? 'High Hazard' : 'Moderate'}
+                    </span>
                   </div>
 
                   <div className="rounded-sm border border-border/80 bg-muted/30 p-2 text-[11px] leading-snug text-muted-foreground">
@@ -694,7 +1132,7 @@ export default function ProjectDetailPage() {
                     </div>
                     <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
                       Potential progress-evidence mismatch — human verification recommended. Field
-                      logs state 46% physical completion, whereas satellite passes estimate 29%.
+                      logs state {project.progressPercent}% physical completion, whereas satellite passes estimate {visualEstimate}%.
                     </p>
                   </div>
 
