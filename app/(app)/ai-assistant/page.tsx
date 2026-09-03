@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { RiskBadge } from '@/components/risk-badge';
 import { EvidenceChip } from '@/components/evidence-chip';
 import { projects as fallbackProjects, alerts, earlyWarnings, getProjectById } from '@/lib/mock-data';
+import { API_BASE_URL } from '@/lib/api-config';
 import { cn } from '@/lib/utils';
 import { riskBandFromScore } from '@/lib/risk';
 import type { Project, ProjectStatus, EvidenceType, RiskBand } from '@/lib/types';
@@ -267,7 +268,7 @@ function AIAssistantContent() {
     let active = true;
     async function loadAssistantProjects() {
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/projects`);
+        const res = await fetch(`${API_BASE_URL}/projects`);
         if (!res.ok) return;
         const data = await res.json();
         if (active && Array.isArray(data) && data.length > 0) {

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { RiskBadge } from '@/components/risk-badge';
 import { EvidenceChip } from '@/components/evidence-chip';
 import { stateRiskData, projects as fallbackProjects } from '@/lib/mock-data';
+import { API_BASE_URL } from '@/lib/api-config';
 import { cn } from '@/lib/utils';
 import { RISK_BAND_LABEL, riskBandFromScore } from '@/lib/risk';
 import type { Project, ProjectStatus, RiskBand } from '@/lib/types';
@@ -218,7 +219,7 @@ export default function MapPage() {
     let active = true;
     async function fetchMapProjects() {
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/projects`);
+        const res = await fetch(`${API_BASE_URL}/projects`);
         if (!res.ok) return;
         const data = await res.json();
         if (active && Array.isArray(data) && data.length > 0) {

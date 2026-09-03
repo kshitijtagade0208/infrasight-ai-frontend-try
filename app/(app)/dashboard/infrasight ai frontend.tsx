@@ -22,6 +22,7 @@ import { cn } from '@/lib/utils';
 import type { RiskBand, EvidenceType, KpiStat, Project, ProjectStatus } from '@/lib/types';
 import { riskBandFromScore } from '@/lib/risk';
 import { projects as fallbackProjects } from '@/lib/mock-data';
+import { API_BASE_URL } from '@/lib/api-config';
 import {
     ArrowRight,
     Clock,
@@ -205,7 +206,7 @@ export default function DashboardPage() {
         let active = true;
         async function fetchData() {
             try {
-                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/projects`);
+                const res = await fetch(`${API_BASE_URL}/projects`);
                 if (!res.ok) {
                     throw new Error(`Failed to fetch: ${res.statusText}`);
                 }
@@ -233,7 +234,7 @@ export default function DashboardPage() {
 
         async function fetchAlerts() {
             try {
-                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/alerts`);
+                const res = await fetch(`${API_BASE_URL}/alerts`);
                 if (!res.ok) return;
                 const data = await res.json();
                 if (active && Array.isArray(data)) {

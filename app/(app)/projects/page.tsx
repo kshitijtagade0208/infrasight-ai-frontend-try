@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { projects as fallbackProjects } from '@/lib/mock-data';
+import { API_BASE_URL } from '@/lib/api-config';
 import { riskBandFromScore } from '@/lib/risk';
 import type { Project, ProjectStatus, RiskBand } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -139,7 +140,7 @@ export default function ProjectsPage() {
     let active = true;
     async function fetchData() {
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/projects`);
+        const res = await fetch(`${API_BASE_URL}/projects`);
         if (!res.ok) {
           throw new Error(`Failed to fetch: ${res.statusText}`);
         }

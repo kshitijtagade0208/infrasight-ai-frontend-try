@@ -24,6 +24,7 @@ import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { getProjectById, getAlertsForProject } from '@/lib/mock-data';
+import { API_BASE_URL } from '@/lib/api-config';
 import { riskBandFromScore } from '@/lib/risk';
 import type { RiskBand, EvidenceType, AlertSeverity, AlertStatus, Alert, Project, ProjectStatus } from '@/lib/types';
 import {
@@ -186,7 +187,7 @@ export default function ProjectDetailPage() {
       try {
         let foundProject: Project | null = null;
         try {
-          const projRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/projects`);
+          const projRes = await fetch(`${API_BASE_URL}/projects`);
           if (projRes.ok) {
             const projData = await projRes.json();
             if (Array.isArray(projData)) {
@@ -210,7 +211,7 @@ export default function ProjectDetailPage() {
 
         let projectAlerts: Alert[] = [];
         try {
-          const alertRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/alerts`);
+          const alertRes = await fetch(`${API_BASE_URL}/alerts`);
           if (alertRes.ok) {
             const alertData = await alertRes.json();
             if (Array.isArray(alertData)) {

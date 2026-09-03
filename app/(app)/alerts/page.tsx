@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { API_BASE_URL } from '@/lib/api-config';
 import type { Alert, AlertSeverity, AlertStatus } from '@/lib/types';
 import { Clock, Search } from 'lucide-react';
 
@@ -65,7 +66,7 @@ export default function AlertsPage() {
   const [alerts, setAlerts] = React.useState<Alert[]>([]);
 
   React.useEffect(() => {
-    fetch(`${process.env.NEXT_PUBLIC_API_URL}/alerts`)
+    fetch(`${API_BASE_URL}/alerts`)
       .then((res) => res.json())
       .then((data) => {
         if (Array.isArray(data)) {
